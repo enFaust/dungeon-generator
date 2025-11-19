@@ -13,8 +13,13 @@ import {
 
 const MAP_WIDTH = 51; // Odd width for maze alignment
 const MAP_HEIGHT = 51; // Odd height for maze alignment
-const MIN_ROOM_SIZE = 5;
-const MAX_ROOM_SIZE = 11;
+
+// Reduced Room Sizes (AD&D 1e style often had smaller rooms in dense dungeons)
+// Grid units * 2 + 1. 
+// Min 2 -> 5x5 tiles (approx 25ft x 25ft)
+// Max 4 -> 9x9 tiles (approx 45ft x 45ft)
+const MIN_ROOM_SIZE = 2; 
+const MAX_ROOM_SIZE = 4;
 
 // Helper: Create a random integer between min and max (inclusive)
 function randomInt(min: number, max: number): number {
@@ -26,16 +31,21 @@ function getRandom<T>(arr: T[]): T {
     return arr[randomInt(0, arr.length - 1)];
 }
 
-// AD&D 1e Random Stocking Table
+// AD&D 1e Random Stocking Table (Dungeon Masters Guide, Appendix A, Table V)
 export function rollRoomContents(): StockingType {
     const roll = randomInt(1, 100);
+    // 01-60: Empty (60%)
     if (roll <= 60) return StockingType.EMPTY;
+    // 61-70: Monster (10%)
     if (roll <= 70) return StockingType.MONSTER;
-    if (roll <= 75) return StockingType.MONSTER_TREASURE;
-    if (roll <= 80) return StockingType.SPECIAL;
-    if (roll <= 85) return StockingType.TRAP;
-    if (roll <= 90) return StockingType.TREASURE;
-    return StockingType.EMPTY;
+    // 71-80: Monster & Treasure (10%)
+    if (roll <= 80) return StockingType.MONSTER_TREASURE;
+    // 81-85: Special (5%)
+    if (roll <= 85) return StockingType.SPECIAL;
+    // 86-90: Trick/Trap (5%)
+    if (roll <= 90) return StockingType.TRAP;
+    // 91-100: Treasure (10%)
+    return StockingType.TREASURE;
 }
 
 function shuffle<T>(array: T[]): T[] {
@@ -58,15 +68,17 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
     for (let i = 0; i < maxAttempts; i++) {
         if (rooms.length >= targetRooms) break;
 
-        const w = randomInt(Math.floor(MIN_ROOM_SIZE/2), Math.floor(MAX_ROOM_SIZE/2)) * 2 + 1;
-        const h = randomInt(Math.floor(MIN_ROOM_SIZE/2), Math.floor(MAX_ROOM_SIZE/2)) * 2 + 1;
+        // Generate dimensions (odd numbers only for maze alignment)
+        const w = randomInt(MIN_ROOM_SIZE, MAX_ROOM_SIZE) * 2 + 1;
+        const h = randomInt(MIN_ROOM_SIZE, MAX_ROOM_SIZE) * 2 + 1;
         const x = randomInt(1, (MAP_WIDTH - w) / 2 - 1) * 2 + 1;
         const y = randomInt(1, (MAP_HEIGHT - h) / 2 - 1) * 2 + 1;
 
         let overlaps = false;
         for (const r of rooms) {
-            if (x < r.x + r.w && x + w > r.x &&
-                y < r.y + r.h && y + h > r.y) {
+            // Add 1 padding to prevent rooms touching without corridors
+            if (x < r.x + r.w + 2 && x + w + 2 > r.x &&
+                y < r.y + r.h + 2 && y + h + 2 > r.y) {
                 overlaps = true;
                 break;
             }
@@ -183,11 +195,10 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         }
     }
 
-    // Sort rooms to ensure ID stability before logic that relies on order (optional but good)
+    // Sort rooms
     rooms.sort((a, b) => (a.y * MAP_WIDTH + a.x) - (b.y * MAP_WIDTH + b.x));
     rooms.forEach((r, i) => r.id = i + 1);
 
-    // Track doors per room for secret room logic
     const roomDoors = new Map<number, Point[]>();
     rooms.forEach(r => roomDoors.set(r.id, []));
 
@@ -196,13 +207,10 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         
         if (myConnectors.length > 0) {
             shuffle(myConnectors);
-            
-            // Open at least 1
             const main = myConnectors[0];
             grid[main.y][main.x] = TileType.DOOR;
             roomDoors.get(room.id)?.push({x: main.x, y: main.y});
 
-            // Extra doors (loops)
             for (let i = 1; i < myConnectors.length; i++) {
                 if (Math.random() < 0.05) { 
                     grid[myConnectors[i].y][myConnectors[i].x] = TileType.DOOR;
@@ -212,7 +220,7 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         }
     });
 
-    // 5. Prune Dead Ends (Corridors)
+    // 5. Prune Dead Ends
     for (let i = 0; i < 100; i++) {
         let changed = false;
         for (let y = 1; y < MAP_HEIGHT - 1; y++) {
@@ -234,36 +242,27 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         if (!changed) break;
     }
 
-    // 6. Secret Rooms Logic
+    // 6. Secret Rooms & Traps
     rooms.forEach(r => {
         if (r.id === 1) return;
         const doors = roomDoors.get(r.id) || [];
-        if (doors.length === 1) {
-            if (Math.random() < 0.15) { // 15% chance for dead ends to be secret
-                r.isSecret = true;
-                const d = doors[0];
-                grid[d.y][d.x] = TileType.SECRET_DOOR;
-            }
+        if (doors.length === 1 && Math.random() < 0.15) {
+            r.isSecret = true;
+            const d = doors[0];
+            grid[d.y][d.x] = TileType.SECRET_DOOR;
         }
     });
 
-    // 7. Traps Generation
-    // Place traps in corridors
+    // Traps
     for (let y = 1; y < MAP_HEIGHT - 1; y++) {
         for (let x = 1; x < MAP_WIDTH - 1; x++) {
             if (grid[y][x] === TileType.CORRIDOR) {
-                // 2% chance per corridor tile
-                if (Math.random() < 0.02) {
-                    traps.push({x, y});
-                }
+                if (Math.random() < 0.02) traps.push({x, y});
             }
         }
     }
-
-    // Place traps in rooms (except entrance)
     rooms.forEach(r => {
         if (r.id === 1) return;
-        // 10% chance the room itself has a trap (center)
         if (Math.random() < 0.10) {
             const cx = Math.floor(r.x + r.w / 2);
             const cy = Math.floor(r.y + r.h / 2);
@@ -271,12 +270,11 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         }
     });
 
-    // 8. Identify Exit Room (Furthest from Entrance)
+    // 7. Exit
     const entrance = rooms.find(r => r.id === 1);
     if (entrance) {
         let maxDist = 0;
         let exitRoom = null;
-        
         rooms.forEach(r => {
             if (r.id === 1) return;
             const dx = r.x - entrance.x;
@@ -287,16 +285,11 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
                 exitRoom = r;
             }
         });
-
-        if (exitRoom) {
-            (exitRoom as RoomData).isExit = true;
-        }
+        if (exitRoom) (exitRoom as RoomData).isExit = true;
     }
 
     return { width: MAP_WIDTH, height: MAP_HEIGHT, grid, rooms, traps };
 }
-
-// --- LOCAL CONTENT GENERATION (NO AI) ---
 
 export function generateLocalDungeonContent(
     level: number,
@@ -304,48 +297,40 @@ export function generateLocalDungeonContent(
     preRolledTypes: StockingType[]
 ): { rooms: GeneratedRoomContent[], lore: DungeonLore, traps: GeneratedTrapContent[] } {
 
-    // Generate Lore
     const lore: DungeonLore = {
         name: `${getRandom(ROOM_ADJECTIVES)} ${getRandom(ROOM_NOUNS)}`,
-        backstory: "Это место было покинуто столетия назад. Местные жители обходят его стороной, рассказывая легенды о древнем зле и скрытых сокровищах.",
-        environment: "Воздух здесь холодный и затхлый. Эхо шагов разносится далеко вперед. Освещения нет, только то, что вы принесли с собой.",
+        backstory: "Давным-давно...",
+        environment: "Мрачно и сыро...",
         randomEncounters: Array(6).fill(null).map((_, i) => ({
             roll: i + 1,
             creature: getRandom(MONSTER_TABLE),
-            situation: "Бродят в поисках пищи или нарушителей."
+            situation: "Бродят."
         }))
     };
 
-    // Generate Rooms
     const rooms: GeneratedRoomContent[] = dungeon.rooms.map((room, idx) => {
         const type = preRolledTypes[idx];
-        const title = room.id === 1 ? "Вход в подземелье" : (room.isExit ? "Спуск на следующий уровень" : getRandom(ROOM_NOUNS));
+        const title = room.id === 1 ? "Вход" : (room.isExit ? "Спуск" : getRandom(ROOM_NOUNS));
         
-        let desc = "";
-        if (room.id === 1) desc += "Ступени ведут вниз, в темноту этого зала. ";
-        
-        desc += `Тут ${getRandom(ROOM_SMELLS)} и слышен ${getRandom(ROOM_SOUNDS)}. `;
-        desc += `Вокруг ${getRandom(ROOM_FEATURES)}. `;
+        // Logic for Chests
+        if (type === StockingType.TREASURE || type === StockingType.MONSTER_TREASURE) {
+            room.hasChest = true;
+        }
 
+        let desc = `Комната ${room.w}x${room.h} футов. `;
         let monsters = "Нет";
         let treasure = "Нет";
         let dmNotes = "Пусто.";
 
         if (type === StockingType.MONSTER || type === StockingType.MONSTER_TREASURE) {
             monsters = getRandom(MONSTER_TABLE);
-            desc += "Вы чувствуете, что вы здесь не одни.";
-            dmNotes = "Монстры настроены враждебно.";
         }
         if (type === StockingType.TREASURE || type === StockingType.MONSTER_TREASURE) {
             treasure = getRandom(TREASURE_TABLE);
-            desc += "Что-то блестит в углу или среди мусора.";
+            desc += "В центре стоит старый сундук."; 
         }
         if (type === StockingType.TRAP) {
-            dmNotes = "В центре комнаты скрытая ловушка. " + getRandom(TRAP_TABLE).name;
-        }
-        if (type === StockingType.SPECIAL) {
-            desc += "Атмосфера в комнате странно тяжелая.";
-            dmNotes = "Магический эффект или головоломка.";
+             dmNotes = `Ловушка в комнате.`;
         }
 
         return {
@@ -359,14 +344,14 @@ export function generateLocalDungeonContent(
         };
     });
 
-    // Generate Traps
     const traps: GeneratedTrapContent[] = dungeon.traps.map(t => {
         const template = getRandom(TRAP_TABLE);
         return {
             id: `${t.x},${t.y}`,
             name: template.name,
             description: template.desc,
-            mechanism: template.mech
+            mechanism: template.mech,
+            discovered: false
         };
     });
 

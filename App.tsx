@@ -1,11 +1,15 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { generateDungeonLayout, rollRoomContents, generateLocalDungeonContent } from './services/dungeonGenerator';
 import { generateDungeonDetails } from './services/geminiService';
-import { DungeonMap, GeneratedRoomContent, StockingType, DungeonLore, GeneratedTrapContent } from './types';
+import { generateParty, rollReaction, parseMonsters, rollDie } from './services/gameRules';
+import { DungeonMap, GeneratedRoomContent, StockingType, DungeonLore, GeneratedTrapContent, Adventurer, Point, ActiveEncounter, EncounterState, RoomData } from './types';
 import { MapViewer } from './components/MapViewer';
-import { Sidebar } from './components/Sidebar';
-import { jsPDF } from "jspdf";
+import { CharacterCard } from './components/CharacterCard';
+import { EncounterModal } from './components/EncounterModal';
+import { StartScreen } from './components/StartScreen';
+import { GameMenu } from './components/GameMenu';
+import jsPDF from 'jspdf';
 
 const App: React.FC = () => {
     const [dungeon, setDungeon] = useState<DungeonMap | null>(null);
@@ -13,367 +17,402 @@ const App: React.FC = () => {
     const [trapContents, setTrapContents] = useState<GeneratedTrapContent[]>([]);
     const [lore, setLore] = useState<DungeonLore | null>(null);
     
-    const [level, setLevel] = useState(1);
-    const [roomCount, setRoomCount] = useState(25); // Default room count
-    const [theme, setTheme] = useState("Древний Склеп");
-    const [description, setDescription] = useState("");
-    
-    const [isGenerating, setIsGenerating] = useState(false); // For Map
-    const [isGeneratingText, setIsGeneratingText] = useState(false); // For AI/Content
-    const [selectedRoomId, setSelectedRoomId] = useState<number | undefined>(undefined);
-    
-    const [useAI, setUseAI] = useState(true);
+    const [isGenerating, setIsGenerating] = useState(false); 
+    const [gameStarted, setGameStarted] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
 
-    const handleGenerateLayout = useCallback(() => {
+    // Game Logic State
+    const [party, setParty] = useState<Adventurer[]>(generateParty());
+    const [logs, setLogs] = useState<string[]>([]);
+    const [viewingCharId, setViewingCharId] = useState<string | null>(null);
+    const [selectedRoomId, setSelectedRoomId] = useState<number | undefined>(undefined);
+    const [discoveredTraps, setDiscoveredTraps] = useState<Set<string>>(new Set());
+    const [lootedChests, setLootedChests] = useState<Set<number>>(new Set());
+    const [stepsTaken, setStepsTaken] = useState(0);
+    
+    // Combat State
+    const [activeEncounter, setActiveEncounter] = useState<ActiveEncounter | null>(null);
+
+    const addLog = (msg: string) => {
+        setLogs(prev => [msg, ...prev].slice(0, 20));
+    };
+
+    const handleStartAdventure = async (config: { level: number; roomCount: number; useAI: boolean; theme: string; details: string }) => {
         setIsGenerating(true);
-        // Clear previous content/lore when regenerating map structure
-        setRoomContents([]);
-        setTrapContents([]);
-        setLore(null);
-        setSelectedRoomId(undefined);
+        setGameStarted(false);
         
+        // Reset Game State
+        setParty(generateParty()); // New party for new adventure
+        setLogs([]);
+        setDiscoveredTraps(new Set());
+        setLootedChests(new Set());
+        setActiveEncounter(null);
+        setSelectedRoomId(undefined);
+        setStepsTaken(0);
+
         try {
-            // Generate Layout
-            const newDungeon = generateDungeonLayout(roomCount); 
+            // 1. Layout
+            const newDungeon = generateDungeonLayout(config.roomCount);
             setDungeon(newDungeon);
+            
+            // 2. Content
+            const preRolledTypes = newDungeon.rooms.map(() => rollRoomContents());
+            let generatedLore: DungeonLore;
+            let generatedRooms: GeneratedRoomContent[];
+            let generatedTraps: GeneratedTrapContent[];
+
+            if (config.useAI) {
+                const result = await generateDungeonDetails(
+                    config.level, 
+                    config.theme, 
+                    config.details, 
+                    newDungeon.rooms, 
+                    preRolledTypes, 
+                    newDungeon.traps
+                );
+                generatedLore = result.lore;
+                generatedRooms = result.rooms;
+                generatedTraps = result.traps.map(t => ({...t, discovered: false}));
+            } else {
+                const result = generateLocalDungeonContent(config.level, newDungeon, preRolledTypes);
+                generatedLore = result.lore;
+                generatedRooms = result.rooms;
+                generatedTraps = result.traps;
+            }
+
+            setLore(generatedLore);
+            setRoomContents(generatedRooms);
+            setTrapContents(generatedTraps);
+
+            // 3. Place Party
+            const entrance = newDungeon.rooms.find(r => r.id === 1);
+            if (entrance) {
+                const cx = Math.floor(entrance.x + entrance.w/2);
+                const cy = Math.floor(entrance.y + entrance.h/2);
+                setParty(prev => prev.map(p => ({...p, position: {x: cx, y: cy}})));
+                setSelectedRoomId(1);
+            }
+
+            setGameStarted(true);
+            addLog("Приключение начинается...");
+
         } catch (e) {
             console.error(e);
-            alert("Ошибка при создании карты!");
+            alert("Ошибка при генерации подземелья. Попробуйте снова.");
         } finally {
             setIsGenerating(false);
         }
-    }, [roomCount]);
+    };
 
-    const handleGenerateContent = useCallback(async () => {
-        if (!dungeon) return;
+    const handleExit = () => {
+        setGameStarted(false);
+        setShowMenu(false);
+        setDungeon(null);
+    };
 
-        setIsGeneratingText(true);
-        try {
-             // Pre-roll stocking types
-            const preRolledTypes = dungeon.rooms.map(() => rollRoomContents());
-
-            if (useAI) {
-                // AI Generation
-                const result = await generateDungeonDetails(level, theme, description, dungeon.rooms, preRolledTypes, dungeon.traps);
-                setRoomContents(result.rooms);
-                setTrapContents(result.traps);
-                setLore(result.lore);
-            } else {
-                // Local Table Generation
-                const result = generateLocalDungeonContent(level, dungeon, preRolledTypes);
-                setRoomContents(result.rooms);
-                setTrapContents(result.traps);
-                setLore(result.lore);
-            }
-        } catch (e) {
-             console.error(e);
-             alert("Ошибка при генерации описания!");
-        } finally {
-            setIsGeneratingText(false);
-        }
-    }, [dungeon, level, theme, description, useAI]);
-
-    const handleDownload = () => {
-        if (!roomContents.length || !lore) return;
-        
-        let text = `# Модуль: ${lore.name}\n`;
-        text += `**Тема:** ${theme}\n`;
-        text += `**Уровень:** ${level}\n`;
-        text += `**Дата:** ${new Date().toLocaleDateString()}\n\n`;
-        
-        if (description && useAI) {
-             text += `**Контекст:** ${description}\n\n`;
-        }
-
-        text += `## Обзор\n`;
-        text += `> ${lore.backstory}\n\n`;
-        text += `**Окружение:** ${lore.environment}\n\n`;
-
-        text += `## Случайные Встречи (1d6)\n`;
-        lore.randomEncounters.forEach(enc => {
-            text += `*   **${enc.roll}:** ${enc.creature} — ${enc.situation}\n`;
+    // --- DOWNLOADS ---
+    const handleDownloadMD = () => {
+        if (!dungeon || !lore) return;
+        let content = `# ${lore.name}\n\n`;
+        content += `> ${lore.backstory}\n\n`;
+        content += `**Environment:** ${lore.environment}\n\n`;
+        content += `## Rooms\n\n`;
+        roomContents.forEach(r => {
+            content += `### ${r.roomId}. ${r.title}\n`;
+            content += `*${r.description}*\n\n`;
+            if (r.monsters !== "Нет") content += `- **Monsters:** ${r.monsters}\n`;
+            if (r.treasure !== "Нет") content += `- **Treasure:** ${r.treasure}\n`;
+            content += `- **DM Notes:** ${r.dmNotes}\n\n`;
         });
-        text += `\n`;
-
-        text += `## Комнаты\n\n`;
-
-        roomContents.forEach(room => {
-            text += `### ${room.roomId}. ${room.title} (${room.type})\n`;
-            text += `> ${room.description}\n\n`;
-            if (room.monsters !== "None" && room.monsters !== "Нет") text += `*   **Монстры:** ${room.monsters}\n`;
-            if (room.treasure !== "None" && room.treasure !== "Нет") text += `*   **Сокровища:** ${room.treasure}\n`;
-            text += `*   **Заметки Мастера:** ${room.dmNotes}\n\n`;
-            text += `---\n\n`;
-        });
-
-        const blob = new Blob([text], { type: 'text/markdown' });
+        
+        const blob = new Blob([content], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `dungeon_lvl${level}_${Date.now()}.md`;
+        a.download = `dungeon_${Date.now()}.md`;
         a.click();
-        URL.revokeObjectURL(url);
     };
 
-    const handleExportPDF = async () => {
-        if (!lore || !roomContents.length) return;
-
-        const doc = new jsPDF({
-            unit: "mm",
-            format: "a4"
-        });
-
-        // Helper to load custom fonts
-        const loadFont = async (url: string, filename: string, fontName: string, style: string) => {
-            try {
-                const response = await fetch(url);
-                const buffer = await response.arrayBuffer();
-                let binary = '';
-                const bytes = new Uint8Array(buffer);
-                const len = bytes.byteLength;
-                for (let i = 0; i < len; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                const base64 = window.btoa(binary);
-                
-                doc.addFileToVFS(filename, base64);
-                doc.addFont(filename, fontName, style);
-            } catch (e) {
-                console.error(`Failed to load font ${filename}`, e);
-            }
-        };
-
-        // Load Cyrillic-supporting fonts (Roboto)
-        await Promise.all([
-            loadFont("https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf", "Roboto-Regular.ttf", "Roboto", "normal"),
-            loadFont("https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf", "Roboto-Medium.ttf", "Roboto", "bold"),
-            loadFont("https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Italic.ttf", "Roboto-Italic.ttf", "Roboto", "italic")
-        ]);
-
-        doc.setFont("Roboto", "normal");
-
-        // 1. Title Page
-        doc.setFontSize(24);
-        doc.setFont("Roboto", "bold");
-        doc.text(lore.name, 20, 30);
+    const handleDownloadPDF = () => {
+        if (!dungeon || !lore) return;
+        const doc = new jsPDF();
+        
+        doc.setFontSize(22);
+        doc.text(lore.name, 10, 20);
         
         doc.setFontSize(12);
-        doc.setFont("Roboto", "normal");
-        doc.text(`Level ${level} | ${theme}`, 20, 40);
-        doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 46);
-
-        doc.setFontSize(14);
-        doc.setFont("Roboto", "bold");
-        doc.text("Backstory", 20, 60);
-        doc.setFontSize(10);
-        doc.setFont("Roboto", "normal");
+        doc.text(doc.splitTextToSize(lore.backstory, 180), 10, 30);
         
-        const splitBackstory = doc.splitTextToSize(lore.backstory, 170);
-        doc.text(splitBackstory, 20, 70);
-        
-        let yPos = 70 + splitBackstory.length * 5 + 10;
+        let y = 60;
+        doc.setFontSize(16);
+        doc.text("Room Keys", 10, y);
+        y += 10;
 
-        doc.setFontSize(14);
-        doc.setFont("Roboto", "bold");
-        doc.text("Environment", 20, yPos);
         doc.setFontSize(10);
-        doc.setFont("Roboto", "normal");
-        const splitEnv = doc.splitTextToSize(lore.environment, 170);
-        doc.text(splitEnv, 20, yPos + 10);
+        roomContents.forEach(r => {
+            if (y > 270) { doc.addPage(); y = 20; }
+            doc.setFont(undefined, 'bold');
+            doc.text(`${r.roomId}. ${r.title}`, 10, y);
+            y += 5;
+            doc.setFont(undefined, 'normal');
+            const desc = doc.splitTextToSize(r.description, 170);
+            doc.text(desc, 15, y);
+            y += desc.length * 4 + 5;
+        });
 
-        yPos += 10 + splitEnv.length * 5 + 10;
+        doc.save('dungeon-map.pdf');
+    };
 
-        // 2. Map Capture
-        const svgElement = document.getElementById('dungeon-map-svg') as unknown as SVGSVGElement;
-        if (svgElement) {
-            try {
-                const serializer = new XMLSerializer();
-                let svgString = serializer.serializeToString(svgElement);
-                
-                // Simple cleanup for standalone SVG
-                if(!svgString.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)){
-                     svgString = svgString.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    // --- GAME LOGIC ---
+
+    const handleUpdateCharacter = (updatedChar: Adventurer) => {
+        setParty(party.map(p => p.id === updatedChar.id ? updatedChar : p));
+    };
+
+    const handleEncounterEnd = () => {
+        // Safe check to update dungeon status if we had a victory
+        if (activeEncounter && dungeon) {
+            if (activeEncounter.state === EncounterState.VICTORY) {
+                if (activeEncounter.roomId > 0) {
+                    const newRooms = dungeon.rooms.map(r => 
+                        r.id === activeEncounter.roomId ? { ...r, monstersDefeated: true } : r
+                    );
+                    setDungeon({ ...dungeon, rooms: newRooms });
+                    addLog(`Комната ${activeEncounter.roomId} зачищена.`);
+                } else {
+                    addLog(`Бродячие монстры побеждены.`);
                 }
-
-                const canvas = document.createElement("canvas");
-                // Get SVG dimensions
-                const width = svgElement.viewBox.baseVal.width || 800;
-                const height = svgElement.viewBox.baseVal.height || 800;
-                
-                // Higher resolution for PDF
-                canvas.width = width * 2;
-                canvas.height = height * 2;
-                
-                const ctx = canvas.getContext("2d");
-                if (ctx) {
-                    const img = new Image();
-                    const svgBlob = new Blob([svgString], {type: "image/svg+xml;charset=utf-8"});
-                    const url = URL.createObjectURL(svgBlob);
-                    
-                    await new Promise((resolve, reject) => {
-                        img.onload = resolve;
-                        img.onerror = reject;
-                        img.src = url;
-                    });
-                    
-                    ctx.fillStyle = '#fcfaf2'; // Classic background
-                    ctx.fillRect(0,0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
-                    const imgData = canvas.toDataURL("image/png");
-                    
-                    // Add new page for Map if low on space
-                    if (yPos > 150) {
-                        doc.addPage();
-                        yPos = 20;
-                    } else {
-                        yPos += 10;
-                    }
-
-                    doc.setFontSize(14);
-                    doc.setFont("Roboto", "bold");
-                    doc.text("Map", 20, yPos);
-                    yPos += 10;
-                    
-                    // Fit map to A4 width (approx 170mm usable)
-                    const pdfImgWidth = 170;
-                    const pdfImgHeight = (canvas.height / canvas.width) * pdfImgWidth;
-                    
-                    if (yPos + pdfImgHeight > 280) {
-                        doc.addPage();
-                        yPos = 20;
-                    }
-                    
-                    doc.addImage(imgData, 'PNG', 20, yPos, pdfImgWidth, pdfImgHeight);
-                    yPos += pdfImgHeight + 10;
-                    
-                    URL.revokeObjectURL(url);
-                }
-            } catch (err) {
-                console.error("Map capture failed", err);
-                doc.text("(Map capture failed - check console)", 20, yPos + 10);
-                yPos += 20;
+            } else if (activeEncounter.state === EncounterState.FLED) {
+                addLog("Группа сбежала!");
             }
         }
-
-        // 3. Encounters
-        doc.addPage();
-        yPos = 20;
-        doc.setFontSize(16);
-        doc.setFont("Roboto", "bold");
-        doc.text("Random Encounters", 20, yPos);
-        yPos += 10;
-        doc.setFontSize(10);
         
-        lore.randomEncounters.forEach(enc => {
-            doc.setFont("Roboto", "bold");
-            doc.text(`d6: ${enc.roll} - ${enc.creature}`, 20, yPos);
-            doc.setFont("Roboto", "normal");
-            const situationLines = doc.splitTextToSize(enc.situation, 160);
-            doc.text(situationLines, 25, yPos + 5);
-            yPos += 5 + situationLines.length * 5 + 5;
-        });
+        // UNCONDITIONALLY clear the encounter state to unlock movement
+        setActiveEncounter(null);
+        
+        // Force blur any active element to ensure window keydown events work
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+        }
+        // Bring focus back to the window
+        window.focus();
+    };
 
-        // 4. Rooms
-        doc.addPage();
-        yPos = 20;
-        doc.setFontSize(16);
-        doc.setFont("Roboto", "bold");
-        doc.text("Room Descriptions", 20, yPos);
-        yPos += 10;
+    const handlePartyMove = (target: Point) => {
+        if (!dungeon || activeEncounter) return;
 
-        roomContents.forEach(room => {
-            // Check page break
-            if (yPos > 250) {
-                doc.addPage();
-                yPos = 20;
+        let encounterTriggered = false;
+        const leader = party[0];
+        const trapKey = `${target.x},${target.y}`;
+        const trap = dungeon.traps.find(t => `${t.x},${t.y}` === trapKey);
+        
+        if (trap && !discoveredTraps.has(trapKey)) {
+            const trapInfo = trapContents.find(t => t.id === trapKey) || { name: "Скрытая Ловушка", description: "Щелчок!", mechanism: "1d6 урона" };
+            addLog(`⚠️ ЛОВУШКА! ${leader.name} наступает на ${trapInfo.name}.`);
+            setDiscoveredTraps(prev => new Set(prev).add(trapKey));
+            return; 
+        }
+
+        const room = dungeon.rooms.find(r => 
+            target.x >= r.x && target.x < r.x + r.w && 
+            target.y >= r.y && target.y < r.y + r.h
+        );
+        
+        if (room) {
+            setSelectedRoomId(room.id);
+            const content = roomContents.find(rc => rc.roomId === room.id);
+            if (content && !room.monstersDefeated && (content.type === StockingType.MONSTER || content.type === StockingType.MONSTER_TREASURE)) {
+                const wasInRoom = dungeon.rooms.find(r => 
+                    leader.position.x >= r.x && leader.position.x < r.x + r.w && 
+                    leader.position.y >= r.y && leader.position.y < r.y + r.h
+                );
+
+                if (wasInRoom?.id !== room.id) {
+                    encounterTriggered = true;
+                    const monsters = parseMonsters(content.monsters, 1); // Assuming level 1 for now, passed in Start
+                    const reaction = rollReaction();
+                    
+                    setActiveEncounter({
+                        roomId: room.id,
+                        monsters: monsters,
+                        state: EncounterState.REACTION,
+                        reactionRoll: reaction.result,
+                        round: 0,
+                        chatHistory: [],
+                        combatLog: []
+                    });
+                }
             }
+        } else {
+            setSelectedRoomId(undefined);
+        }
 
-            doc.setFontSize(12);
-            doc.setFont("Roboto", "bold");
-            doc.text(`${room.roomId}. ${room.title} (${room.type})`, 20, yPos);
-            yPos += 6;
-            
-            doc.setFontSize(10);
-            doc.setFont("Roboto", "italic");
-            const descLines = doc.splitTextToSize(room.description, 170);
-            doc.text(descLines, 20, yPos);
-            yPos += descLines.length * 5 + 2;
+        if (encounterTriggered) return;
 
-            doc.setFont("Roboto", "normal");
-            
-            if (room.monsters !== "None" && room.monsters !== "Нет") {
-                const m = `Monsters: ${room.monsters}`;
-                const mLines = doc.splitTextToSize(m, 170);
-                doc.text(mLines, 20, yPos);
-                yPos += mLines.length * 5;
+        // Snake Movement
+        const newParty = [...party];
+        let prevPos = { ...newParty[0].position };
+        newParty[0].position = target;
+        for (let i = 1; i < newParty.length; i++) {
+            const temp = { ...newParty[i].position };
+            newParty[i].position = prevPos;
+            prevPos = temp;
+        }
+        setParty(newParty);
+
+        // Wandering Monster Check (INCREASED FREQUENCY)
+        // Check every 3 steps, 50% chance (1-3 on d6)
+        const newSteps = stepsTaken + 1;
+        setStepsTaken(newSteps);
+
+        if (newSteps % 3 === 0 && lore) {
+            if (rollDie(6) <= 3) { // 50% chance every 3 steps (Very Frequent)
+                const randomEncounter = lore.randomEncounters[rollDie(6) - 1];
+                if (randomEncounter) {
+                    const monsters = parseMonsters(randomEncounter.creature, 1);
+                    const reaction = rollReaction();
+                    
+                    addLog("⚠️ СЛУЧАЙНАЯ ВСТРЕЧА! " + randomEncounter.creature);
+                    
+                    setActiveEncounter({
+                        roomId: -1, // Wandering
+                        monsters: monsters,
+                        state: EncounterState.REACTION,
+                        reactionRoll: reaction.result,
+                        round: 0,
+                        chatHistory: [],
+                        combatLog: [`Вы натыкаетесь на бродячих монстров: ${randomEncounter.creature}`, `Ситуация: ${randomEncounter.situation}`]
+                    });
+                }
             }
-            
-            if (room.treasure !== "None" && room.treasure !== "Нет") {
-                 const t = `Treasure: ${room.treasure}`;
-                 const tLines = doc.splitTextToSize(t, 170);
-                 doc.text(tLines, 20, yPos);
-                 yPos += tLines.length * 5;
-            }
+        }
+    };
 
-            if (room.dmNotes) {
-                doc.setTextColor(100);
-                const n = `DM Note: ${room.dmNotes}`;
-                const nLines = doc.splitTextToSize(n, 170);
-                doc.text(nLines, 20, yPos);
-                doc.setTextColor(0);
-                yPos += nLines.length * 5;
-            }
+    const handleChestLoot = (roomId: number) => {
+        const room = dungeon?.rooms.find(r => r.id === roomId);
+        const content = roomContents.find(r => r.roomId === roomId);
+        
+        if (content && (content.type === StockingType.MONSTER || content.type === StockingType.MONSTER_TREASURE)) {
+             if (!room?.monstersDefeated) {
+                 addLog("⛔ Нельзя открыть сундук, пока монстры рядом!");
+                 return;
+             }
+        }
 
-            yPos += 5; // Spacing
-        });
+        setLootedChests(prev => new Set(prev).add(roomId));
+        if (content) {
+            addLog(`💰 Группа открывает сундук: ${content.treasure}`);
+        }
+    };
 
-        doc.save(`dungeon_${level}_${theme.replace(/\s+/g, '_')}.pdf`);
+    const handleReorderParty = (fromIndex: number, toIndex: number) => {
+        if (toIndex < 0 || toIndex >= party.length) return;
+        const newParty = [...party];
+        const [moved] = newParty.splice(fromIndex, 1);
+        newParty.splice(toIndex, 0, moved);
+        setParty(newParty);
+        addLog(`Порядок изменен: ${moved.name} теперь на позиции ${toIndex + 1}`);
     };
 
     return (
-        <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden bg-[#e5e7eb]">
-            <Sidebar 
-                isGenerating={isGenerating}
-                isGeneratingText={isGeneratingText}
-                level={level}
-                setLevel={setLevel}
-                roomCount={roomCount}
-                setRoomCount={setRoomCount}
-                theme={theme}
-                setTheme={setTheme}
-                description={description}
-                setDescription={setDescription}
-                onGenerateLayout={handleGenerateLayout}
-                onGenerateContent={handleGenerateContent}
-                hasLayout={!!dungeon}
-                roomContents={roomContents}
-                lore={lore}
-                selectedRoomId={selectedRoomId}
-                onSelectRoom={setSelectedRoomId}
-                onDownload={handleDownload}
-                onExportPDF={handleExportPDF}
-                useAI={useAI}
-                setUseAI={setUseAI}
-            />
-            <div className="flex-1 relative h-full">
-                {dungeon ? (
-                    <MapViewer 
-                        dungeon={dungeon} 
-                        roomContents={roomContents}
-                        trapContents={trapContents}
-                        selectedRoomId={selectedRoomId}
-                        onRoomSelect={setSelectedRoomId}
+        <div className="flex h-screen w-screen overflow-hidden bg-black relative">
+            
+            {/* START SCREEN */}
+            {!gameStarted && (
+                <div className="absolute inset-0 z-50">
+                    <StartScreen 
+                        onStart={handleStartAdventure} 
+                        isGenerating={isGenerating}
                     />
-                ) : (
-                    <div className="flex items-center justify-center h-full opacity-30">
-                        <div className="text-center">
-                            <div className="text-6xl mb-4 grayscale">🏰</div>
-                            <p className="font-sans text-gray-800">Создайте планировку подземелья...</p>
+                </div>
+            )}
+
+            {/* GAME VIEW */}
+            {gameStarted && dungeon && (
+                <>
+                    <div className="w-full h-full">
+                        <MapViewer 
+                            dungeon={dungeon} 
+                            roomContents={roomContents}
+                            trapContents={trapContents}
+                            selectedRoomId={selectedRoomId}
+                            onRoomSelect={setSelectedRoomId}
+                            party={party}
+                            onPartyMove={handlePartyMove}
+                            onSelectCharacter={setViewingCharId}
+                            logs={logs}
+                            discoveredTraps={discoveredTraps}
+                            lootedChests={lootedChests}
+                            onLootChest={handleChestLoot}
+                            readOnly={false}
+                            onReorderParty={handleReorderParty}
+                        />
+                    </div>
+
+                    {/* Menu Button */}
+                    <button 
+                        onClick={() => setShowMenu(true)}
+                        className="absolute top-4 left-4 z-40 bg-[#2c241b] text-[#eaddcf] border-2 border-[#8b4513] px-3 py-2 rounded shadow-lg hover:bg-[#3e2b1f] flex items-center gap-2 font-bold uppercase text-xs"
+                    >
+                        📜 Меню / Журнал
+                    </button>
+
+                    {/* Floating Log for Game Events */}
+                    <div className="absolute bottom-20 left-4 z-30 w-80 pointer-events-none">
+                        <div className="flex flex-col-reverse gap-1">
+                            {logs.slice(0, 5).map((log, i) => (
+                                <div key={i} className="bg-black/70 text-white px-2 py-1 text-xs rounded border-l-2 border-blue-500 backdrop-blur-sm animate-in slide-in-from-left-2">
+                                    {log}
+                                </div>
+                            ))}
                         </div>
                     </div>
-                )}
-            </div>
+                </>
+            )}
+            
+            {/* MODALS */}
+            
+            {/* Character Modal */}
+            {viewingCharId && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-lg shadow-2xl p-4 w-full max-w-md max-h-[90vh] overflow-y-auto relative border-4 border-[#8b4513]">
+                            <button 
+                            onClick={() => setViewingCharId(null)}
+                            className="absolute top-2 right-2 text-gray-500 hover:text-red-600 z-10 text-2xl font-bold"
+                        >
+                            ✕
+                        </button>
+                        <CharacterCard 
+                            char={party.find(p => p.id === viewingCharId)!}
+                            onUpdate={handleUpdateCharacter}
+                            onLog={addLog}
+                            compact={true}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Encounter Modal */}
+            {activeEncounter && (
+                <EncounterModal 
+                    encounter={activeEncounter}
+                    party={party}
+                    updateEncounter={setActiveEncounter}
+                    updateParty={setParty}
+                    onClose={handleEncounterEnd}
+                    useAI={true} // AI is handled by Start config usually, but defaulting true here for interaction
+                />
+            )}
+
+            {/* Game Menu Modal */}
+            <GameMenu 
+                isOpen={showMenu}
+                onClose={() => setShowMenu(false)}
+                lore={lore}
+                onDownloadMD={handleDownloadMD}
+                onDownloadPDF={handleDownloadPDF}
+                onExit={handleExit}
+            />
         </div>
     );
 };

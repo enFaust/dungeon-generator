@@ -4,6 +4,7 @@ import { GeneratedRoomContent, RoomData, StockingType, DungeonLore, Point, Gener
 
 const genAI = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+// ... (Previous generateDungeonDetails code remains, keeping it short for the diff, but assuming full file content is preserved by context or simple append)
 export const generateDungeonDetails = async (
     level: number,
     theme: string,
@@ -161,5 +162,72 @@ export const generateDungeonDetails = async (
                 mechanism: "1d6 урона."
             }))
         };
+    }
+};
+
+export const chatWithMonster = async (
+    monsterName: string,
+    userMessage: string,
+    history: {sender: string, text: string}[]
+): Promise<{ response: string, isHostile: boolean }> => {
+    const prompt = `
+    You are roleplaying as: ${monsterName} in an Old School D&D dungeon.
+    The adventurers have encountered you.
+    
+    Conversation History:
+    ${history.map(h => `${h.sender}: ${h.text}`).join('\n')}
+    Adventurers: "${userMessage}"
+    
+    Respond as the monster. Be concise (under 30 words).
+    If the adventurers insult you or fail to convince you, become HOSTILE.
+    If they bribe you or pass a charisma check via text (persuade you), become FRIENDLY.
+    
+    Output JSON.
+    `;
+
+    try {
+         const response = await genAI.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        response: { type: Type.STRING },
+                        isHostile: { type: Type.BOOLEAN }
+                    }
+                }
+            }
+        });
+        
+        if (response.text) {
+            return JSON.parse(response.text);
+        }
+        return { response: "Grrr...", isHostile: true };
+    } catch (e) {
+        return { response: "(AI Error) The monster stares blankly.", isHostile: false };
+    }
+};
+
+export const getMonsterCombatBark = async (monsterName: string): Promise<string> => {
+    const prompt = `
+    You are a hostile ${monsterName} attacking adventurers.
+    Scream a short, aggressive battle cry or threat (under 10 words).
+    Language: Russian.
+    Do not use quotes.
+    `;
+
+    try {
+        const response = await genAI.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "text/plain",
+            }
+        });
+        return response.text?.trim() || "ГРАААА!";
+    } catch (e) {
+        return "УМРИ!";
     }
 };
