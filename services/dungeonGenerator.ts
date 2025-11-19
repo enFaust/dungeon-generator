@@ -1,4 +1,3 @@
-
 import { DungeonMap, RoomData, StockingType, TileType, Rect, Point, GeneratedRoomContent, DungeonLore, GeneratedTrapContent } from '../types';
 import { 
     MONSTER_TABLE, 
@@ -16,10 +15,10 @@ const MAP_HEIGHT = 51; // Odd height for maze alignment
 
 // Reduced Room Sizes (AD&D 1e style often had smaller rooms in dense dungeons)
 // Grid units * 2 + 1. 
-// Min 2 -> 5x5 tiles (approx 25ft x 25ft)
-// Max 4 -> 9x9 tiles (approx 45ft x 45ft)
-const MIN_ROOM_SIZE = 2; 
-const MAX_ROOM_SIZE = 4;
+// Min 1 -> 3x3 tiles (approx 15ft x 15ft)
+// Max 3 -> 7x7 tiles (approx 35ft x 35ft)
+const MIN_ROOM_SIZE = 1; 
+const MAX_ROOM_SIZE = 3;
 
 // Helper: Create a random integer between min and max (inclusive)
 function randomInt(min: number, max: number): number {
@@ -46,14 +45,6 @@ export function rollRoomContents(): StockingType {
     if (roll <= 90) return StockingType.TRAP;
     // 91-100: Treasure (10%)
     return StockingType.TREASURE;
-}
-
-function shuffle<T>(array: T[]): T[] {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
 }
 
 export function generateDungeonLayout(targetRooms: number): DungeonMap {
@@ -87,9 +78,10 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         if (x + w >= MAP_WIDTH - 1 || y + h >= MAP_HEIGHT - 1) overlaps = true;
 
         if (!overlaps) {
-            const newRoom: RoomData = { id: 0, x, y, w, h, connections: [] };
+            const newRoom: RoomData = { id: rooms.length + 1, x, y, w, h, connections: [] };
             rooms.push(newRoom);
             
+            // Carve room
             for (let ry = y; ry < y + h; ry++) {
                 for (let rx = x; rx < x + w; rx++) {
                     grid[ry][rx] = TileType.FLOOR;
@@ -98,262 +90,155 @@ export function generateDungeonLayout(targetRooms: number): DungeonMap {
         }
     }
 
-    // 3. Maze Generation
-    const directions = [
-        { x: 0, y: -2 },
-        { x: 0, y: 2 },
-        { x: -2, y: 0 },
-        { x: 2, y: 0 } 
-    ];
+    // 3. Connect Rooms (Simple Chain + L-Corridors)
+    for (let i = 0; i < rooms.length - 1; i++) {
+        const r1 = rooms[i];
+        const r2 = rooms[i+1];
 
-    const growMaze = (sx: number, sy: number) => {
-        const stack: Point[] = [{ x: sx, y: sy }];
-        grid[sy][sx] = TileType.CORRIDOR;
+        const c1 = { x: Math.floor(r1.x + r1.w / 2), y: Math.floor(r1.y + r1.h / 2) };
+        const c2 = { x: Math.floor(r2.x + r2.w / 2), y: Math.floor(r2.y + r2.h / 2) };
 
-        while (stack.length > 0) {
-            const current = stack[stack.length - 1];
-            const validDirs = [];
-
-            for (const d of directions) {
-                const nx = current.x + d.x;
-                const ny = current.y + d.y;
-
-                if (nx > 0 && nx < MAP_WIDTH - 1 && ny > 0 && ny < MAP_HEIGHT - 1) {
-                    if (grid[ny][nx] === TileType.WALL) {
-                        validDirs.push(d);
-                    }
-                }
-            }
-
-            if (validDirs.length > 0) {
-                const dir = validDirs[randomInt(0, validDirs.length - 1)];
-                const nx = current.x + dir.x;
-                const ny = current.y + dir.y;
-                
-                const mx = current.x + dir.x / 2;
-                const my = current.y + dir.y / 2;
-                
-                grid[my][mx] = TileType.CORRIDOR;
-                grid[ny][nx] = TileType.CORRIDOR;
-                
-                stack.push({ x: nx, y: ny });
-            } else {
-                stack.pop();
-            }
+        if (Math.random() < 0.5) {
+            carveHCorridor(grid, c1.x, c2.x, c1.y);
+            carveVCorridor(grid, c1.y, c2.y, c2.x);
+        } else {
+            carveVCorridor(grid, c1.y, c2.y, c1.x);
+            carveHCorridor(grid, c1.x, c2.x, c2.y);
         }
-    };
-
-    for (let y = 1; y < MAP_HEIGHT; y += 2) {
-        for (let x = 1; x < MAP_WIDTH; x += 2) {
-            if (grid[y][x] === TileType.WALL) {
-                growMaze(x, y);
-            }
-        }
-    }
-
-    // 4. Connect Rooms
-    interface Connector {
-        x: number;
-        y: number;
-        roomA: RoomData;
-    }
-
-    const connectors: Connector[] = [];
-    const getRoomAt = (x: number, y: number): RoomData | undefined => {
-        return rooms.find(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
-    };
-
-    for (let y = 1; y < MAP_HEIGHT - 1; y++) {
-        for (let x = 1; x < MAP_WIDTH - 1; x++) {
-            if (grid[y][x] === TileType.WALL) {
-                const tLeft = grid[y][x-1];
-                const tRight = grid[y][x+1];
-                const tUp = grid[y-1][x];
-                const tDown = grid[y+1][x];
-
-                let roomA = null;
-                let isConnectable = false;
-
-                if (tLeft === TileType.FLOOR && (tRight === TileType.CORRIDOR || tRight === TileType.FLOOR)) {
-                     roomA = getRoomAt(x-1, y);
-                     isConnectable = true;
-                } else if (tRight === TileType.FLOOR && (tLeft === TileType.CORRIDOR || tLeft === TileType.FLOOR)) {
-                     roomA = getRoomAt(x+1, y);
-                     isConnectable = true;
-                } else if (tUp === TileType.FLOOR && (tDown === TileType.CORRIDOR || tDown === TileType.FLOOR)) {
-                     roomA = getRoomAt(x, y-1);
-                     isConnectable = true;
-                } else if (tDown === TileType.FLOOR && (tUp === TileType.CORRIDOR || tUp === TileType.FLOOR)) {
-                     roomA = getRoomAt(x, y+1);
-                     isConnectable = true;
-                }
-
-                if (isConnectable && roomA) {
-                    connectors.push({ x, y, roomA });
-                }
-            }
-        }
-    }
-
-    // Sort rooms
-    rooms.sort((a, b) => (a.y * MAP_WIDTH + a.x) - (b.y * MAP_WIDTH + b.x));
-    rooms.forEach((r, i) => r.id = i + 1);
-
-    const roomDoors = new Map<number, Point[]>();
-    rooms.forEach(r => roomDoors.set(r.id, []));
-
-    rooms.forEach(room => {
-        const myConnectors = connectors.filter(c => c.roomA === room);
         
-        if (myConnectors.length > 0) {
-            shuffle(myConnectors);
-            const main = myConnectors[0];
-            grid[main.y][main.x] = TileType.DOOR;
-            roomDoors.get(room.id)?.push({x: main.x, y: main.y});
-
-            for (let i = 1; i < myConnectors.length; i++) {
-                if (Math.random() < 0.05) { 
-                    grid[myConnectors[i].y][myConnectors[i].x] = TileType.DOOR;
-                    roomDoors.get(room.id)?.push({x: myConnectors[i].x, y: myConnectors[i].y});
-                }
-            }
-        }
-    });
-
-    // 5. Prune Dead Ends
-    for (let i = 0; i < 100; i++) {
-        let changed = false;
-        for (let y = 1; y < MAP_HEIGHT - 1; y++) {
-            for (let x = 1; x < MAP_WIDTH - 1; x++) {
-                if (grid[y][x] === TileType.CORRIDOR) {
-                    let wallCount = 0;
-                    if (grid[y-1][x] === TileType.WALL) wallCount++;
-                    if (grid[y+1][x] === TileType.WALL) wallCount++;
-                    if (grid[y][x-1] === TileType.WALL) wallCount++;
-                    if (grid[y][x+1] === TileType.WALL) wallCount++;
-
-                    if (wallCount >= 3) {
-                        grid[y][x] = TileType.WALL;
-                        changed = true;
-                    }
-                }
-            }
-        }
-        if (!changed) break;
+        r1.connections.push(r2.id);
+        r2.connections.push(r1.id);
     }
 
-    // 6. Secret Rooms & Traps
-    rooms.forEach(r => {
-        if (r.id === 1) return;
-        const doors = roomDoors.get(r.id) || [];
-        if (doors.length === 1 && Math.random() < 0.15) {
-            r.isSecret = true;
-            const d = doors[0];
-            grid[d.y][d.x] = TileType.SECRET_DOOR;
+    // 4. Place Doors & Traps
+    rooms.forEach(room => {
+        // Doors at boundaries if touching floor
+        for (let xx = room.x; xx < room.x + room.w; xx++) {
+            if (grid[room.y - 1][xx] === TileType.FLOOR) placeDoor(grid, xx, room.y - 1);
+            if (grid[room.y + room.h][xx] === TileType.FLOOR) placeDoor(grid, xx, room.y + room.h);
+        }
+        for (let yy = room.y; yy < room.y + room.h; yy++) {
+            if (grid[yy][room.x - 1] === TileType.FLOOR) placeDoor(grid, room.x - 1, yy);
+            if (grid[yy][room.x + room.w] === TileType.FLOOR) placeDoor(grid, room.x + room.w, yy);
         }
     });
 
-    // Traps
+    // Simple trap placement in corridors
     for (let y = 1; y < MAP_HEIGHT - 1; y++) {
         for (let x = 1; x < MAP_WIDTH - 1; x++) {
-            if (grid[y][x] === TileType.CORRIDOR) {
-                if (Math.random() < 0.02) traps.push({x, y});
+            if (grid[y][x] === TileType.FLOOR && Math.random() < 0.02) {
+                const inRoom = rooms.some(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+                if (!inRoom) {
+                    traps.push({ x, y });
+                }
             }
         }
     }
-    rooms.forEach(r => {
-        if (r.id === 1) return;
-        if (Math.random() < 0.10) {
-            const cx = Math.floor(r.x + r.w / 2);
-            const cy = Math.floor(r.y + r.h / 2);
-            traps.push({x: cx, y: cy});
-        }
-    });
 
-    // 7. Exit
-    const entrance = rooms.find(r => r.id === 1);
-    if (entrance) {
-        let maxDist = 0;
-        let exitRoom = null;
-        rooms.forEach(r => {
-            if (r.id === 1) return;
-            const dx = r.x - entrance.x;
-            const dy = r.y - entrance.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist > maxDist) {
-                maxDist = dist;
-                exitRoom = r;
-            }
-        });
-        if (exitRoom) (exitRoom as RoomData).isExit = true;
+    if (rooms.length > 0) {
+        rooms[0].isSecret = false;
+        rooms[rooms.length - 1].isExit = true;
     }
 
-    return { width: MAP_WIDTH, height: MAP_HEIGHT, grid, rooms, traps };
+    return {
+        width: MAP_WIDTH,
+        height: MAP_HEIGHT,
+        grid,
+        rooms,
+        traps
+    };
 }
 
+function carveHCorridor(grid: TileType[][], x1: number, x2: number, y: number) {
+    for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
+        if (grid[y][x] === TileType.WALL) grid[y][x] = TileType.FLOOR;
+    }
+}
+
+function carveVCorridor(grid: TileType[][], y1: number, y2: number, x: number) {
+    for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) {
+        if (grid[y][x] === TileType.WALL) grid[y][x] = TileType.FLOOR;
+    }
+}
+
+function placeDoor(grid: TileType[][], x: number, y: number) {
+    if (x <= 0 || x >= MAP_WIDTH - 1 || y <= 0 || y >= MAP_HEIGHT - 1) return;
+    // Avoid placing doors on existing floor (corridor overlaps) unless necessary
+    // Simplification: just place if not already floor? No, we need to overwrite floor for visual door
+    // But corridors are floor. Doors are separate tile.
+    if (Math.random() < 0.15) {
+        grid[y][x] = Math.random() < 0.1 ? TileType.SECRET_DOOR : TileType.DOOR;
+    } else {
+        grid[y][x] = TileType.FLOOR; // Just open archway
+    }
+}
+
+// Generate content without AI (using tables)
 export function generateLocalDungeonContent(
     level: number,
     dungeon: DungeonMap,
     preRolledTypes: StockingType[]
 ): { rooms: GeneratedRoomContent[], lore: DungeonLore, traps: GeneratedTrapContent[] } {
-
+    
     const lore: DungeonLore = {
-        name: `${getRandom(ROOM_ADJECTIVES)} ${getRandom(ROOM_NOUNS)}`,
-        backstory: "Давным-давно...",
-        environment: "Мрачно и сыро...",
+        name: `Подземелье Уровня ${level}`,
+        backstory: "Это место было покинуто много веков назад. Стены хранят следы древних битв и забытых ритуалов.",
+        environment: "Холодный воздух, запах сырости и далекое капание воды раздаются в тишине.",
         randomEncounters: Array(6).fill(null).map((_, i) => ({
             roll: i + 1,
-            creature: getRandom(MONSTER_TABLE),
-            situation: "Бродят."
+            creature: getRandom(MONSTER_TABLE).split(' (')[0],
+            situation: "Блуждает в поисках добычи."
         }))
     };
 
-    const rooms: GeneratedRoomContent[] = dungeon.rooms.map((room, idx) => {
-        const type = preRolledTypes[idx];
-        const title = room.id === 1 ? "Вход" : (room.isExit ? "Спуск" : getRandom(ROOM_NOUNS));
+    const rooms: GeneratedRoomContent[] = dungeon.rooms.map((room, i) => {
+        const stocking = preRolledTypes[i];
+        const adjective = getRandom(ROOM_ADJECTIVES);
+        const noun = getRandom(ROOM_NOUNS);
+        const smell = getRandom(ROOM_SMELLS);
+        const sound = getRandom(ROOM_SOUNDS);
+        const feature = getRandom(ROOM_FEATURES);
         
-        // Logic for Chests
-        if (type === StockingType.TREASURE || type === StockingType.MONSTER_TREASURE) {
+        let monsters = "Нет";
+        let treasure = "Нет";
+        let desc = `${adjective} ${noun}. В воздухе висит ${smell}. Слышен ${sound}. В углу заметны ${feature}.`;
+        let dmNotes = "Обычная комната.";
+
+        if (stocking === StockingType.MONSTER || stocking === StockingType.MONSTER_TREASURE) {
+            monsters = getRandom(MONSTER_TABLE);
+            room.monstersDefeated = false;
+        }
+
+        if (stocking === StockingType.TREASURE || stocking === StockingType.MONSTER_TREASURE) {
+            treasure = getRandom(TREASURE_TABLE);
             room.hasChest = true;
         }
 
-        let desc = `Комната ${room.w}x${room.h} футов. `;
-        let monsters = "Нет";
-        let treasure = "Нет";
-        let dmNotes = "Пусто.";
-
-        if (type === StockingType.MONSTER || type === StockingType.MONSTER_TREASURE) {
-            monsters = getRandom(MONSTER_TABLE);
-        }
-        if (type === StockingType.TREASURE || type === StockingType.MONSTER_TREASURE) {
-            treasure = getRandom(TREASURE_TABLE);
-            desc += "В центре стоит старый сундук."; 
-        }
-        if (type === StockingType.TRAP) {
-             dmNotes = `Ловушка в комнате.`;
+        if (stocking === StockingType.TRAP) {
+             dmNotes = "Ловушка в центре комнаты.";
         }
 
         return {
             roomId: room.id,
-            title: title,
-            type: type,
+            title: `${adjective} ${noun}`,
+            type: stocking,
+            monsters,
+            treasure,
             description: desc,
-            monsters: monsters,
-            treasure: treasure,
-            dmNotes: dmNotes
+            dmNotes
         };
     });
 
     const traps: GeneratedTrapContent[] = dungeon.traps.map(t => {
-        const template = getRandom(TRAP_TABLE);
+        const trapData = getRandom(TRAP_TABLE);
         return {
             id: `${t.x},${t.y}`,
-            name: template.name,
-            description: template.desc,
-            mechanism: template.mech,
+            name: trapData.name,
+            description: trapData.desc,
+            mechanism: trapData.mech,
             discovered: false
         };
     });
 
-    return { lore, rooms, traps };
+    return { rooms, lore, traps };
 }

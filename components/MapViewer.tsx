@@ -223,7 +223,11 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [leader.position, readOnly, doorAttempt, dungeon, openedDoors]);
+        // CRITICAL FIX: Added handleTileClick to dependencies. 
+        // handleTileClick changes on every render (because it's a new closure over props).
+        // This ensures handleKeyDown always uses the latest version of onPartyMove,
+        // preventing stale closures where the activeEncounter state might be outdated (blocking movement).
+    }, [leader.position, readOnly, doorAttempt, dungeon, openedDoors, handleTileClick]);
 
     const attemptOpenDoor = () => {
         if (!doorAttempt) return;

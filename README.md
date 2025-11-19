@@ -1,20 +1,18 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# OSric's Dungeon Architect
 
-# Run and deploy your AI Studio app
+A procedural dungeon map generator compliant with AD&D 1e stocking rules, powered by Gemini AI.
 
-This contains everything you need to run your app locally.
+## 🚀 Deploy to Vercel
 
-View your app in AI Studio: https://ai.studio/apps/drive/1pS7OmKwanoZ80RDuVtx1VDDTNTa9ofQk
+1. Push this code to a GitHub repository.
+2. Create a new project on Vercel and select your repository.
+3. **IMPORTANT:** In the Vercel Project Settings, add the following Environment Variable:
+   - Name: `API_KEY`
+   - Value: `Your_Google_Gemini_API_Key`
+4. Click **Deploy**.
 
-## Run Locally
+## Local Development
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. `npm install`
+2. `export API_KEY=your_key_here` (Linux/Mac) or `set API_KEY=your_key_here` (Windows)
+3. `npm run dev`
