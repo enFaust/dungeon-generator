@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OSric's Dungeon Architect</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar for that retro feel */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #eaddcf; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #8b4513; 
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5e2f0d; 
+        }
+        .font-retro {
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .paper-bg {
+            background-color: #fdf6e3;
+            background-image: 
+                linear-gradient(#dceef5 1px, transparent 1px),
+                linear-gradient(90deg, #dceef5 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "jspdf": "https://esm.sh/jspdf@2.5.1"
+  }
+}
+</script>
+</head>
+  <body class="bg-[#2c241b] text-[#2c241b]">
+    <div id="root"></div>
+  </body>
+</html>
