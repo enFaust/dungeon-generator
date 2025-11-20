@@ -2,6 +2,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GeneratedRoomContent, RoomData, StockingType, DungeonLore, Point, GeneratedTrapContent } from '../types';
 
+declare const process: {
+    env: {
+        API_KEY: string | undefined;
+    }
+};
+
 // Helper to lazily get the AI client. 
 // This prevents the app from crashing on import if process.env.API_KEY is missing.
 const getAI = () => {

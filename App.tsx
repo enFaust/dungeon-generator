@@ -155,10 +155,10 @@ const App: React.FC = () => {
         doc.setFontSize(10);
         roomContents.forEach(r => {
             if (y > 270) { doc.addPage(); y = 20; }
-            doc.setFont(undefined, 'bold');
+            doc.setFont("helvetica", 'bold');
             doc.text(`${r.roomId}. ${r.title}`, 10, y);
             y += 5;
-            doc.setFont(undefined, 'normal');
+            doc.setFont("helvetica", 'normal');
             const desc = doc.splitTextToSize(r.description, 170);
             doc.text(desc, 15, y);
             y += desc.length * 4 + 5;
