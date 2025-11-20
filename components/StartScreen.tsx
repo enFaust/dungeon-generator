@@ -9,7 +9,7 @@ interface StartScreenProps {
 export const StartScreen: React.FC<StartScreenProps> = ({ onStart, isGenerating }) => {
     const [level, setLevel] = useState(1);
     const [roomCount, setRoomCount] = useState(20);
-    const [useAI, setUseAI] = useState(true);
+    const [useAI, setUseAI] = useState(false);
     const [theme, setTheme] = useState("Древний Склеп");
     const [details, setDetails] = useState("");
 
@@ -62,44 +62,49 @@ export const StartScreen: React.FC<StartScreenProps> = ({ onStart, isGenerating 
                         </div>
                     </div>
 
-                    {/* AI Toggle */}
+                    {/* AI Toggle Checkbox */}
                     <div className="border-2 border-[#5e2f0d] p-4 bg-[#1e1812]">
-                        <div className="flex items-center justify-between mb-4">
-                            <span className="text-sm font-bold uppercase">Режим Генерации</span>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={() => setUseAI(false)}
-                                    className={`px-3 py-1 text-xs font-bold uppercase border ${!useAI ? 'bg-[#eaddcf] text-[#2c241b] border-[#eaddcf]' : 'text-[#5e2f0d] border-[#5e2f0d]'}`}
-                                >
-                                    Таблицы
-                                </button>
-                                <button 
-                                    onClick={() => setUseAI(true)}
-                                    className={`px-3 py-1 text-xs font-bold uppercase border ${useAI ? 'bg-[#eaddcf] text-[#2c241b] border-[#eaddcf]' : 'text-[#5e2f0d] border-[#5e2f0d]'}`}
-                                >
-                                    Gemini AI
-                                </button>
+                        <label className="flex items-center gap-3 cursor-pointer select-none mb-2 group">
+                            <div className={`w-6 h-6 border-2 flex items-center justify-center transition-all ${useAI ? 'bg-[#eaddcf] border-[#eaddcf]' : 'border-[#5e2f0d] bg-black group-hover:border-[#8b4513]'}`}>
+                                {useAI && <span className="text-[#2c241b] font-bold text-lg leading-none">✓</span>}
                             </div>
-                        </div>
+                            <input 
+                                type="checkbox" 
+                                checked={useAI} 
+                                onChange={(e) => setUseAI(e.target.checked)}
+                                className="hidden"
+                            />
+                            <div>
+                                <span className={`text-sm font-bold uppercase block transition-colors ${useAI ? 'text-[#eaddcf]' : 'text-gray-500 group-hover:text-gray-400'}`}>
+                                    Включить ИИ Мастера (Gemini)
+                                </span>
+                            </div>
+                        </label>
+                        
+                        <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-4 pl-9">
+                            {useAI 
+                                ? "Генерация уникальных описаний, ловушек и диалоги с монстрами." 
+                                : "Стандартный режим: Случайные таблицы AD&D 1e (Быстро, работает оффлайн)."}
+                        </p>
 
                         {useAI && (
-                            <div className="space-y-3 animate-in fade-in">
+                            <div className="space-y-3 pl-9 border-l-2 border-[#5e2f0d] ml-3 animate-in slide-in-from-left-2 fade-in">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] uppercase text-gray-500">Тема</label>
+                                    <label className="text-[10px] uppercase text-[#8b4513] bg-[#eaddcf] px-1 w-max font-bold">Тема Подземелья</label>
                                     <input 
                                         type="text" 
                                         value={theme}
                                         onChange={(e) => setTheme(e.target.value)}
-                                        className="w-full bg-black border border-[#5e2f0d] text-[#eaddcf] p-2 text-sm focus:outline-none"
+                                        className="w-full bg-black border border-[#5e2f0d] text-[#eaddcf] p-2 text-sm focus:outline-none focus:border-[#eaddcf]"
                                         placeholder="Напр. Логово Культистов"
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-[10px] uppercase text-gray-500">Детали (Опционально)</label>
+                                    <label className="text-[10px] uppercase text-[#8b4513] bg-[#eaddcf] px-1 w-max font-bold">Детали (Опционально)</label>
                                     <textarea 
                                         value={details}
                                         onChange={(e) => setDetails(e.target.value)}
-                                        className="w-full bg-black border border-[#5e2f0d] text-[#eaddcf] p-2 text-sm focus:outline-none h-20 resize-none"
+                                        className="w-full bg-black border border-[#5e2f0d] text-[#eaddcf] p-2 text-sm focus:outline-none focus:border-[#eaddcf] h-20 resize-none"
                                         placeholder="Опишите атмосферу или главного злодея..."
                                     />
                                 </div>
@@ -128,7 +133,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({ onStart, isGenerating 
                 </div>
 
                 <div className="mt-6 text-center text-xs text-[#5e2f0d] uppercase">
-                    v1.0.0 • OSR RULES • AD&D 1e / B/X
+                    v1.1.0 • OSR RULES • AD&D 1e / B/X
                 </div>
             </div>
         </div>

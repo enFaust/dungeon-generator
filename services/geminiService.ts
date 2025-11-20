@@ -2,7 +2,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GeneratedRoomContent, RoomData, StockingType, DungeonLore, Point, GeneratedTrapContent } from '../types';
 
-const genAI = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper to lazily get the AI client. 
+// This prevents the app from crashing on import if process.env.API_KEY is missing.
+const getAI = () => {
+    const key = process.env.API_KEY;
+    if (!key) return null;
+    return new GoogleGenAI({ apiKey: key });
+};
 
 // ... (Previous generateDungeonDetails code remains, keeping it short for the diff, but assuming full file content is preserved by context or simple append)
 export const generateDungeonDetails = async (
@@ -13,6 +19,11 @@ export const generateDungeonDetails = async (
     preRolledTypes: StockingType[],
     traps: Point[]
 ): Promise<{ rooms: GeneratedRoomContent[], lore: DungeonLore, traps: GeneratedTrapContent[] }> => {
+    
+    const genAI = getAI();
+    if (!genAI) {
+        throw new Error("API Key missing. Cannot generate AI content.");
+    }
 
     // Helper to check if a room has a physical trap
     const checkTrap = (r: RoomData) => {
@@ -170,6 +181,9 @@ export const chatWithMonster = async (
     userMessage: string,
     history: {sender: string, text: string}[]
 ): Promise<{ response: string, isHostile: boolean }> => {
+    const genAI = getAI();
+    if (!genAI) return { response: "...", isHostile: false };
+
     const prompt = `
     You are roleplaying as: ${monsterName} in an Old School D&D dungeon.
     The adventurers have encountered you.
@@ -211,6 +225,9 @@ export const chatWithMonster = async (
 };
 
 export const getMonsterCombatBark = async (monsterName: string): Promise<string> => {
+    const genAI = getAI();
+    if (!genAI) return "";
+
     const prompt = `
     You are a hostile ${monsterName} attacking adventurers.
     Scream a short, aggressive battle cry or threat (under 10 words).

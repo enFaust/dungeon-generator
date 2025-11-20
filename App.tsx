@@ -21,6 +21,9 @@ const App: React.FC = () => {
     const [gameStarted, setGameStarted] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
 
+    // AI State
+    const [useAI, setUseAI] = useState(false);
+
     // Game Logic State
     const [party, setParty] = useState<Adventurer[]>(generateParty());
     const [logs, setLogs] = useState<string[]>([]);
@@ -40,6 +43,7 @@ const App: React.FC = () => {
     const handleStartAdventure = async (config: { level: number; roomCount: number; useAI: boolean; theme: string; details: string }) => {
         setIsGenerating(true);
         setGameStarted(false);
+        setUseAI(config.useAI);
         
         // Reset Game State
         setParty(generateParty()); // New party for new adventure
@@ -98,7 +102,7 @@ const App: React.FC = () => {
 
         } catch (e) {
             console.error(e);
-            alert("Ошибка при генерации подземелья. Попробуйте снова.");
+            alert("Ошибка при генерации подземелья. Если API ключ не задан, попробуйте режим 'Таблицы'.");
         } finally {
             setIsGenerating(false);
         }
@@ -190,12 +194,15 @@ const App: React.FC = () => {
         // UNCONDITIONALLY clear the encounter state to unlock movement
         setActiveEncounter(null);
         
-        // Force blur any active element to ensure window keydown events work
-        if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-        }
-        // Bring focus back to the window
-        window.focus();
+        // Use setTimeout to allow React to unmount the modal before we force focus
+        setTimeout(() => {
+            // Force blur any active element (like buttons in the now-closed modal if they persisted)
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+            // Bring focus back to the window/body to capture keydown events
+            window.focus();
+        }, 0);
     };
 
     const handlePartyMove = (target: Point) => {
@@ -400,7 +407,7 @@ const App: React.FC = () => {
                     updateEncounter={setActiveEncounter}
                     updateParty={setParty}
                     onClose={handleEncounterEnd}
-                    useAI={true} // AI is handled by Start config usually, but defaulting true here for interaction
+                    useAI={useAI} 
                 />
             )}
 
